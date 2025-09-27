@@ -37,43 +37,72 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     let mounted = true;
 
     /**
-     * Initialize authentication state
+     * Initialize authentication state with timeout
      */
     const initializeAuth = async () => {
-      try {
-        // Get current session
-        const session = await AuthService.getSession();
+    console.log('🚀 AUTH: Starting authentication initialization...');
+    
+    try {
+      // Set a timeout for the entire initialization process
+      const initPromise = (async () => {
+        console.log('📡 AUTH: Getting current session...');
         
-        if (session?.user && mounted) {
-          // User is authenticated, get profile
-          const authUser = session.user;
-          let userProfile = await DatabaseService.getUserProfile(authUser.id);
+        // Add timeout to getSession to prevent hanging
+        const sessionPromise = AuthService.getSession();
+        const timeoutPromise = new Promise<null>((_, reject) => 
+          setTimeout(() => reject(new Error('Session timeout')), 5000)
+        );
+        
+        const session = await Promise.race([sessionPromise, timeoutPromise]);
+        console.log('📡 AUTH: Session result:', session ? 'Found' : 'None');
+        
+        if (session?.user) {
+          console.log('👤 AUTH: User found, checking profile...');
           
-          // If user profile doesn't exist, create it
-          if (!userProfile) {
-            console.log('Creating missing user profile for:', authUser.email);
-            userProfile = await DatabaseService.upsertUserProfile({
-              id: authUser.id,
-              email: authUser.email!,
-              name: authUser.user_metadata?.name || authUser.email!.split('@')[0],
-              avatar_url: authUser.user_metadata?.avatar_url,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            });
+          // Check if user profile exists
+           try {
+             let profile = await DatabaseService.getUserProfile(session.user.id);
+             console.log('👤 AUTH: Profile check result:', profile ? 'Found' : 'Not found');
+            
+            if (!profile) {
+               console.log('👤 AUTH: Creating new user profile...');
+               profile = await DatabaseService.upsertUserProfile({
+                 id: session.user.id,
+                 email: session.user.email || '',
+                 name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+                 created_at: new Date().toISOString(),
+                 updated_at: new Date().toISOString()
+               });
+             }
+             
+             // Set authenticated state with profile data
+             useAuthStore.setState({
+               user: profile,
+               isAuthenticated: true,
+               isLoading: false,
+               error: null
+             });
+             
+           } catch (profileError) {
+             console.error('❌ AUTH: Profile error:', profileError);
+             // Continue with authentication even if profile fails
+             // Create a minimal user object from session data
+             const fallbackUser = {
+               id: session.user.id,
+               email: session.user.email || '',
+               name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+               created_at: new Date().toISOString(),
+               updated_at: new Date().toISOString()
+             };
+             useAuthStore.setState({
+               user: fallbackUser,
+               isAuthenticated: true,
+               isLoading: false,
+               error: null
+             });
           }
-          
-          if (userProfile) {
-            useAuthStore.setState({
-              user: userProfile,
-              isAuthenticated: true,
-              isLoading: false,
-              error: null
-            });
-          }
-        }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
-        if (mounted) {
+        } else {
+          console.log('🚫 AUTH: No user session, setting unauthenticated');
           useAuthStore.setState({
             user: null,
             isAuthenticated: false,
@@ -81,12 +110,34 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             error: null
           });
         }
-      } finally {
-        if (mounted) {
-          setIsInitialized(true);
-        }
+      })();
+      
+      // Set overall timeout for initialization
+      const overallTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Overall initialization timeout')), 8000)
+      );
+      
+      await Promise.race([initPromise, overallTimeout]);
+      
+    } catch (error) {
+      console.error('❌ AUTH: Initialization error:', error);
+      // On any error, set to unauthenticated state
+      useAuthStore.setState({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Authentication failed'
+      });
+    } finally {
+      // Always set initialized to true when done
+      if (mounted) {
+        console.log('✅ AUTH: Setting isInitialized to true');
+        setIsInitialized(true);
       }
-    };
+    }
+    
+    console.log('🏁 AUTH: Authentication initialization complete');
+  };
 
     /**
      * Handle authentication state changes
