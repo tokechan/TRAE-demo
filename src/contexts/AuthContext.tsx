@@ -50,10 +50,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // Add timeout to getSession to prevent hanging
         const sessionPromise = AuthService.getSession();
         const timeoutPromise = new Promise<null>((_, reject) => 
-          setTimeout(() => reject(new Error('Session timeout')), 5000)
+          setTimeout(() => reject(new Error('Session timeout - Supabase認証サーバーへの接続がタイムアウトしました。ネットワーク接続を確認してください。')), 5000)
         );
         
-        const session = await Promise.race([sessionPromise, timeoutPromise]);
+        let session;
+        try {
+          session = await Promise.race([sessionPromise, timeoutPromise]);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('Session timeout')) {
+            console.warn('⚠️ AUTH: Session timeout occurred - this may be due to network issues or first-time access');
+            // タイムアウトの場合は未認証として処理を続行
+            session = null;
+          } else {
+            throw error;
+          }
+        }
         console.log('📡 AUTH: Session result:', session ? 'Found' : 'None');
         
         if (session?.user) {
@@ -121,13 +132,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
     } catch (error) {
       console.error('❌ AUTH: Initialization error:', error);
-      // On any error, set to unauthenticated state
-      useAuthStore.setState({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Authentication failed'
-      });
+      
+      // Session timeoutの場合は特別な処理
+      if (error instanceof Error && error.message.includes('Session timeout')) {
+        console.log('🔄 AUTH: Session timeout detected - setting to unauthenticated state');
+        useAuthStore.setState({
+          user: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: null // Session timeoutは通常のエラーとして表示しない
+        });
+      } else {
+        // その他のエラーの場合
+        useAuthStore.setState({
+          user: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: error instanceof Error ? error.message : 'Authentication failed'
+        });
+      }
     } finally {
       // Always set initialized to true when done
       if (mounted) {
