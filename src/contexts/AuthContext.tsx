@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, ReactNode } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { AuthService, DatabaseService } from '../lib/supabase';
@@ -250,19 +251,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 /**
  * Hook to use authentication context
  */
-export const useAuthContext = () => {
+function useAuthContext() {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuthContext must be used within an AuthProvider');
   }
   return context;
-};
+}
 
 /**
  * Higher-order component for protected routes
  */
-export const withAuth = <P extends object>(Component: React.ComponentType<P>) => {
-  return (props: P) => {
+function withAuth<P extends object>(Component: React.ComponentType<P>) {
+  const WrappedComponent = (props: P) => {
     const { isAuthenticated, isLoading } = useAuthStore();
     const { isInitialized } = useAuthContext();
 
@@ -279,4 +280,10 @@ export const withAuth = <P extends object>(Component: React.ComponentType<P>) =>
 
     return <Component {...props} />;
   };
-};
+  
+  WrappedComponent.displayName = `withAuth(${Component.displayName || Component.name})`;
+  return WrappedComponent;
+}
+
+// Export functions separately to avoid Fast Refresh issues
+export { useAuthContext, withAuth };
